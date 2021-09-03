@@ -1,59 +1,62 @@
 const service = require("./reviews.service");
 const asyncErrorBoundary = require("../errors/asyncErrorBoundary");
+const methodNotAllowed = require("../errors/methodNotAllowed");
 
-async function list(req, res) {
-  const reviews = await service.list(req.params.movieId);
-  res.json({ data: reviews });
-}
+async function reviewExists(request, response, next) {
+  const review = await service.read(request.params.reviewId);
 
-async function update(req, res) {
-  const updatedReview = {
-    ...res.locals.review,
-    ...res.locals.updatedReview,
-  };
-  const data = await service.update(updatedReview);
-  res.json({ data });
-}
-
-async function destroy(req, res) {
-  await service.destroy(res.locals.review.review_id);
-  res.sendStatus(204);
-}
-
-
-//MIDDLEWARE
-
-async function reviewExists(req, res, next) {
-  const review = await service.read(req.params.reviewId);
   if (review) {
-    res.locals.review = review;
+    response.locals.review = review;
     return next();
   }
+
   next({ status: 404, message: `Review cannot be found.` });
 }
 
-async function hasReviewProps(req, res, next) {
-  const { data } = req.body;
-  if (
-    (!data.content && data.score) ||
-    (data.content && !data.score) ||
-    (data.content && data.score)
-  ) {
-    res.locals.updatedReview = data;
+async function destroy(request, response) {
+  await service.destroy(response.locals.review.review_id);
+  response.sendStatus(204);
+}
+
+async function list(request, response) {
+  const data = await service.list(request.params.movieId);
+  response.json({ data });
+}
+
+function hasMovieIdInPath(request, response, next) {
+  if (request.params.movieId) {
     return next();
   }
-  next({
-    status: 400,
-    message: `The update request must include score and/or content properties.`,
-  });
+  methodNotAllowed(request, response, next);
+}
+
+function noMovieIdInPath(request, response, next) {
+  if (request.params.movieId) {
+    return methodNotAllowed(request, response, next);
+  }
+  next();
+}
+
+async function update(request, response) {
+  const updatedReview = {
+    ...response.locals.review,
+    ...request.body.data,
+    review_id: response.locals.review.review_id,
+  };
+  const data = await service.update(updatedReview);
+  response.json({ data });
 }
 
 module.exports = {
-  list: asyncErrorBoundary(list),
-  update: [
+  destroy: [
+    noMovieIdInPath,
     asyncErrorBoundary(reviewExists),
-    asyncErrorBoundary(hasReviewProps),
+    asyncErrorBoundary(destroy),
+  ],
+  list: [hasMovieIdInPath, asyncErrorBoundary(list)],
+  update: [
+    noMovieIdInPath,
+    asyncErrorBoundary(reviewExists),
     asyncErrorBoundary(update),
   ],
-  destroy: [asyncErrorBoundary(reviewExists), asyncErrorBoundary(destroy)],
 };
